@@ -3,9 +3,35 @@
 <head>
     <title>Painel da Coordenação</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+
+    <style>
+        .filter-box { background-color: #e9ecef; border-bottom: 1px solid #dee2e6; padding: 20px 0; margin-bottom: 30px; }
+        .card-approved { border-left: 5px solid #198754; }
+        .card-rejected { border-left: 5px solid #dc3545; }
+        .card-pending { border-left: 5px solid #ffc107; }
+        .card-cancelled { border-left: 5px solid #6c757d; background-color: #f8f9fa; opacity: 0.8; }
+        .item-coord { background-color: #e8f5e9; }
+    </style>
+
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0d6efd">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(reg => console.log('PWA registrado!', reg))
+                    .catch(err => console.log('Erro PWA:', err));
+            });
+        }
+    </script>
 </head>
 <body>
-    <nav class="navbar navbar-dark bg-success mb-4">
+    <nav class="navbar navbar-dark bg-success mb-3">
         <div class="container">
             <span class="navbar-brand">Coordenação</span>
             <a href="/logout" class="btn btn-light btn-sm">Sair</a>
@@ -13,77 +39,349 @@
     </nav>
 
     <div class="container">
-        <div class="btn-group w-100 mb-4">
-            <a href="/coordenacao?visualizacao=pendentes" class="btn btn-outline-primary {{ 'active' if filtro_atual == 'pendentes' else '' }}">Pedidos Pendentes</a>
-            <a href="/coordenacao?visualizacao=concluidos" class="btn btn-outline-success {{ 'active' if filtro_atual == 'concluidos' else '' }}">Histórico Concluído</a>
-        </div>
 
-        {% if not pedidos %}
-            <div class="alert alert-info text-center">Nenhum pedido nesta categoria.</div>
+        <ul class="nav nav-tabs mb-4">
+            <li class="nav-item">
+                <a class="nav-link {% if aba_ativa == 'pedidos' %}active{% endif %}" href="/coordenacao?aba=pedidos">📋 Gerenciar Pedidos</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if aba_ativa == 'catalogo' %}active{% endif %}" href="/coordenacao?aba=catalogo">📦 Estoque & Catálogo</a>
+            </li>
+        </ul>
+
+        {% if aba_ativa == 'pedidos' %}
+
+            <div class="filter-box rounded p-3 mb-4">
+                <form action="/coordenacao" method="GET" class="row g-2 align-items-end">
+                    <input type="hidden" name="aba" value="pedidos">
+                    <div class="col-md-3">
+                        <label class="fw-bold small">Professor</label>
+                        <select name="professor" class="form-select form-select-sm">
+                            <option value="">Todos</option>
+                            {% for prof in lista_professores %}
+                            <option value="{{ prof }}" {% if filtros.professor == prof %}selected{% endif %}>{{ prof }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="fw-bold small">Data Início</label>
+                        <input type="date" name="data_ini" class="form-control form-control-sm" value="{{ filtros.data_ini }}">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="fw-bold small">Data Fim</label>
+                        <input type="date" name="data_fim" class="form-control form-control-sm" value="{{ filtros.data_fim }}">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="fw-bold small">Status</label>
+                        <select name="visualizacao" class="form-select form-select-sm">
+                            <option value="pendentes" {% if filtros.visualizacao == 'pendentes' %}selected{% endif %}>Pendentes</option>
+                            <option value="concluidos" {% if filtros.visualizacao == 'concluidos' %}selected{% endif %}>Concluídos</option>
+                            <option value="cancelados" {% if filtros.visualizacao == 'cancelados' %}selected{% endif %}>Cancelados</option>
+                            <option value="todos" {% if filtros.visualizacao == 'todos' %}selected{% endif %}>Todos</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 d-flex gap-2">
+                        <button type="submit" class="btn btn-primary btn-sm flex-grow-1">Filtrar</button>
+                        <a href="/coordenacao" class="btn btn-secondary btn-sm">Limpar</a>
+                    </div>
+                </form>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="text-muted">{{ pedidos|length }} pedidos encontrados</h5>
+                <div>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="selecionarTodos()">Selecionar Tudo</button>
+                    <button type="submit" form="formExportacao" class="btn btn-danger btn-sm">📄 Exportar PDF</button>
+                </div>
+            </div>
+
+            {% if not pedidos %}
+                <div class="alert alert-info text-center">Nenhum pedido encontrado.</div>
+            {% endif %}
+
+            <form action="/exportar_pdf" method="POST" id="formExportacao"></form>
+
+            {% for pedido in pedidos %}
+            <div class="card mb-4 shadow-sm
+                {% if pedido.status_geral == 'Concluido' %} card-approved
+                {% elif pedido.status_geral == 'Cancelado' %} card-cancelled
+                {% else %} card-pending {% endif %}">
+
+                <div class="card-header bg-light d-flex align-items-center">
+                    <div class="form-check me-3">
+                        <input class="form-check-input checkbox-pedido" type="checkbox" name="ids_pedidos" value="{{ pedido.id }}" form="formExportacao" style="transform: scale(1.3);">
+                    </div>
+
+                    <div class="flex-grow-1 d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>Prof. {{ pedido.professor }}</strong>
+                            <span class="badge bg-secondary ms-2">Pedido #{{ pedido.id }}</span>
+                            {% if pedido.status_geral == 'Cancelado' %}
+                                <span class="badge bg-dark ms-2">CANCELADO</span>
+                            {% endif %}
+
+                            {% if pedido.status_geral != 'Cancelado' %}
+                            <button type="button" class="btn btn-link p-0 ms-2 text-primary" title="Adicionar item extra" onclick="abrirModalEdicao('{{ pedido.id }}')">
+                                <i class="bi bi-pencil-square fs-5"></i>
+                            </button>
+                            {% endif %}
+                        </div>
+                        <span class="text-muted small">{{ pedido.data }}</span>
+                    </div>
+                </div>
+
+                <div class="card-body p-0">
+                    <form action="/atualizar_pedido" method="POST">
+                        <table class="table table-hover mb-0 align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 35%;">Material</th>
+                                    <th style="width: 10%;" class="text-center">Solicitado</th>
+                                    <th style="width: 15%;" class="text-center">Qtd. Entregar</th>
+                                    <th style="width: 40%;" class="text-center">Ação</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in pedido.itens %}
+                                <tr class="{% if item[3] == 'Cancelado' %}table-secondary text-muted{% elif item[5] == 'coordenacao' %}item-coord{% endif %}">
+                                    <td>
+                                        {{ item[1] }}
+                                        {% if item[5] == 'coordenacao' %}
+                                            <i class="bi bi-person-fill-gear text-success" title="Adicionado pela Coordenação"></i>
+                                        {% endif %}
+                                        {% if item[3] == 'Cancelado' %}<small class="d-block">(Cancelado)</small>{% endif %}
+                                    </td>
+
+                                    <td class="text-center">
+                                        <span class="badge bg-secondary">{{ item[2] }}</span>
+                                    </td>
+
+                                    <td class="text-center">
+                                        {% if item[3] == 'Pendente' %}
+                                            <input type="number" step="0.01" name="qtd_aprov_{{ item[0] }}" class="form-control form-control-sm text-center mx-auto" style="width: 70px;" value="{{ item[2] }}" min="0">
+                                        {% elif item[3] == 'Cancelado' %}
+                                            -
+                                        {% else %}
+                                            <strong>{{ item[4] }}</strong>
+                                        {% endif %}
+                                    </td>
+
+                                    <td class="text-center">
+                                        {% if item[3] == 'Pendente' %}
+                                            <div class="btn-group" role="group">
+                                                <input type="radio" class="btn-check" name="status_{{ item[0] }}" id="aprov_{{ item[0] }}" value="Aprovado">
+                                                <label class="btn btn-outline-success btn-sm" for="aprov_{{ item[0] }}">Aprovar</label>
+
+                                                <input type="radio" class="btn-check" name="status_{{ item[0] }}" id="reprov_{{ item[0] }}" value="Reprovado">
+                                                <label class="btn btn-outline-danger btn-sm" for="reprov_{{ item[0] }}">Reprovar</label>
+                                            </div>
+                                        {% elif item[3] == 'Aprovado' %}
+                                            <span class="badge bg-success">Aprovado</span>
+                                        {% elif item[3] == 'Reprovado' %}
+                                            <span class="badge bg-danger">Reprovado</span>
+                                        {% elif item[3] == 'Cancelado' %}
+                                            <span class="badge bg-dark">Cancelado</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+
+                        {% if pedido.status_geral == 'Pendente' %}
+                        <div class="card-footer bg-white text-end">
+                            <button type="button" class="btn btn-outline-success btn-sm" onclick="aprovarTodosItens(this.closest('form'))">
+                                <i class="bi bi-check-all"></i> Aprovar Todos
+                            </button>
+
+                            <button type="submit" class="btn btn-primary btn-sm">💾 Salvar Decisões</button>
+                        </div>
+                        {% endif %}
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+
+        {% elif aba_ativa == 'catalogo' %}
+
+            <div class="row">
+                <div class="col-md-4">
+
+                    <div class="card mb-4 shadow-sm">
+                        <div class="card-header bg-success text-white">Importar Lista (CSV)</div>
+                        <div class="card-body">
+                            <form action="/importar_csv" method="POST" enctype="multipart/form-data">
+                                <div class="mb-3">
+                                    <label class="form-label small">Selecione o arquivo .csv</label>
+                                    <input type="file" name="arquivo_csv" class="form-control" accept=".csv" required>
+                                </div>
+                                <button type="submit" class="btn btn-success w-100">⬆ Carregar Produtos</button>
+                                <small class="text-muted d-block mt-2">O arquivo deve ter uma coluna com os nomes.</small>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-primary text-white">Adicionar Produto Único</div>
+                        <div class="card-body">
+                            <form action="/gerenciar_catalogo" method="POST">
+                                <input type="hidden" name="acao" value="adicionar">
+                                <div class="mb-3">
+                                    <label class="form-label small">Nome do Produto</label>
+                                    <input type="text" name="nome_produto" class="form-control" placeholder="Ex: Cola Bastão" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100">+ Adicionar</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-8">
+                    <div class="card shadow-sm">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>📦 Itens Cadastrados ({{ catalogo|length }})</span>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="list-group list-group-flush" style="max-height: 600px; overflow-y: auto;">
+                                {% for produto in catalogo %}
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <span>{{ produto[1] }}</span>
+                                        <div class="btn-group">
+                                            <button class="btn btn-outline-secondary btn-sm" onclick="abrirModalRenomear('{{ produto[0] }}', '{{ produto[1] }}')">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+
+                                            <form action="/gerenciar_catalogo" method="POST" onsubmit="return confirm('Tem certeza? Isso pode afetar a validação de novos pedidos.');" style="display:inline;">
+                                                <input type="hidden" name="acao" value="deletar">
+                                                <input type="hidden" name="id_produto" value="{{ produto[0] }}">
+                                                <button type="submit" class="btn btn-outline-danger btn-sm">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                {% else %}
+                                    <div class="p-4 text-center text-muted">Nenhum produto cadastrado. Importe um CSV ou adicione manualmente.</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         {% endif %}
 
-        {% for pedido in pedidos %}
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light d-flex justify-content-between">
-                <strong>Prof. {{ pedido.professor }}</strong>
-                <small class="text-muted">{{ pedido.data }}</small>
-            </div>
-            <div class="card-body">
-                <form action="/atualizar_pedido" method="POST">
-                    <table class="table table-hover align-middle">
-                        <thead>
-                            <tr>
-                                <th width="30%">Material</th>
-                                <th width="10%">Pedido</th>
-                                <th width="20%">Entregue</th>
-                                <th width="40%" class="text-center">Decisão</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in pedido.itens %}
-                            <tr>
-                                <td>{{ item[1] }}</td>
-                                <td><span class="badge bg-secondary">{{ item[2] }}</span></td>
+    </div>
 
-                                <td>
-                                    {% if item[3] == 'Pendente' %}
-                                        <input type="number" name="qtd_aprov_{{ item[0] }}" class="form-control form-control-sm" value="{{ item[2] }}" min="0">
-                                    {% else %}
-                                        <strong>{{ item[4] }}</strong>
-                                    {% endif %}
-                                </td>
-
-                                <td class="text-center">
-                                    {% if item[3] == 'Pendente' %}
-                                        <div class="btn-group" role="group">
-                                            <input type="radio" class="btn-check" name="status_{{ item[0] }}" id="aprov_{{ item[0] }}" value="Aprovado">
-                                            <label class="btn btn-outline-success btn-sm" for="aprov_{{ item[0] }}">Aprovar</label>
-
-                                            <input type="radio" class="btn-check" name="status_{{ item[0] }}" id="reprov_{{ item[0] }}" value="Reprovado">
-                                            <label class="btn btn-outline-danger btn-sm" for="reprov_{{ item[0] }}">Reprovar</label>
-                                        </div>
-                                    {% else %}
-                                        {% if item[3] == 'Aprovado' %}
-                                            <span class="badge bg-success">Aprovado</span>
-                                        {% else %}
-                                            <span class="badge bg-danger">Reprovado</span>
-                                        {% endif %}
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-
-                    {% if filtro_atual == 'pendentes' %}
-                    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
-                        <button type="submit" class="btn btn-primary">Salvar Decisões</button>
+    <div class="modal fade" id="modalEdicao" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title">Adicionar Itens ao Pedido</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form action="/adicionar_itens_coordenacao" method="POST">
+                    <div class="modal-body">
+                        <input type="hidden" name="pedido_id" id="modalPedidoId">
+                        <p class="text-muted small">Adicione itens para substituir ou complementar o pedido.</p>
+                        <div id="listaNovosItens"></div>
+                        <button type="button" class="btn btn-outline-primary btn-sm mt-2" onclick="adicionarCampoExtra()">
+                            <i class="bi bi-plus-lg"></i> Adicionar Item
+                        </button>
                     </div>
-                    {% endif %}
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-success">Salvar Itens</button>
+                    </div>
                 </form>
             </div>
         </div>
-        {% endfor %}
     </div>
+
+    <div class="modal fade" id="modalRenomear" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-warning-subtle">
+                    <h5 class="modal-title">Renomear Produto</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form action="/gerenciar_catalogo" method="POST">
+                    <div class="modal-body">
+                        <input type="hidden" name="acao" value="renomear">
+                        <input type="hidden" name="id_produto" id="renameId">
+
+                        <label class="form-label">Novo Nome:</label>
+                        <input type="text" name="novo_nome" id="renameNome" class="form-control" required>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Salvar Alteração</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        function selecionarTodos() {
+            let checkboxes = document.querySelectorAll('.checkbox-pedido');
+            let algumDesmarcado = Array.from(checkboxes).some(c => !c.checked);
+            checkboxes.forEach(c => c.checked = algumDesmarcado);
+        }
+
+        // Modal Itens Extras
+        const modalEdicao = new bootstrap.Modal(document.getElementById('modalEdicao'));
+        function abrirModalEdicao(idPedido) {
+            document.getElementById('modalPedidoId').value = idPedido;
+            document.getElementById('listaNovosItens').innerHTML = '';
+            adicionarCampoExtra();
+            modalEdicao.show();
+        }
+
+        function adicionarCampoExtra() {
+            const div = document.createElement('div');
+            div.className = 'row g-2 mb-2 align-items-center';
+            div.innerHTML = `
+                <div class="col-7">
+                    <input type="text" name="extra_material[]" class="form-control form-control-sm" placeholder="Nome do Material" list="listaGlobal" required>
+                </div>
+                <div class="col-3">
+                    <input type="number" step="0.01" name="extra_qtd[]" class="form-control form-control-sm" placeholder="Qtd" required>
+                </div>
+                <div class="col-2">
+                    <button type="button" class="btn btn-outline-danger btn-sm w-100" onclick="this.parentElement.parentElement.remove()">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            `;
+            document.getElementById('listaNovosItens').appendChild(div);
+        }
+
+        // Modal Renomear
+        const modalRenomear = new bootstrap.Modal(document.getElementById('modalRenomear'));
+        function abrirModalRenomear(id, nomeAtual) {
+            document.getElementById('renameId').value = id;
+            document.getElementById('renameNome').value = nomeAtual;
+            modalRenomear.show();
+        }
+
+        function aprovarTodosItens(formulario) {
+            // Seleciona todos os radio buttons de 'Aprovado' dentro deste formulário específico
+            const radiosAprovar = formulario.querySelectorAll('input[type="radio"][value="Aprovado"]');
+
+            radiosAprovar.forEach(radio => {
+                radio.checked = true;
+            });
+        }
+    </script>
+
+    <datalist id="listaGlobal">
+        {% for produto in catalogo %}
+            <option value="{{ produto[1] }}">
+        {% endfor %}
+    </datalist>
+
 </body>
 </html>
